@@ -4,16 +4,16 @@
 #include "stencil.h"
 #include "amul.h"
 
-// Exchange + Dzyaloshinskii-Moriya interaction for bulk material.
+//Despiralized Exchange +  Despiralzied Dzyaloshinskii-Moriya interaction for bulk material.
+
 // Energy:
-//
-// 	E  = D M . rot(M)
-//
+// E = (A nabla m)² + D sin(qy) (MydzMz - MzdzMy +MydxMx -MxdxMz) + D cos(qy) (MzdxMy - MydxMz + MydxMx -Mxdzmy) + D²/4A My²
+// q=D/2A
 // Effective field:
 //
-// 	Hx = 2A/Bs nabla²Mx + 2D/Bs dzMy - 2D/Bs dyMz
-// 	Hy = 2A/Bs nabla²My + 2D/Bs dxMz - 2D/Bs dzMx
-// 	Hz = 2A/Bs nabla²Mz + 2D/Bs dyMx - 2D/Bs dxMy
+// 	Hx = 2A/Bs nabla²Mx + 2D/Bs sin(qy) dyMy + 2D/Bs cos(qy) dzMy
+// 	Hy = 2A/Bs nabla²My - 2D/Bs sin(qy) (dzMz + dxMx) - 2D/Bs cos(qy) (dzMx - dxMz) - D²/2ABs My
+// 	Hz = 2A/Bs nabla²Mz + 2D/Bs sin(qy) dzMy - 2D/Bs cos(qy) dxMy
 //
 // Boundary conditions:
 //
@@ -73,8 +73,9 @@ adddmibulk(float* __restrict__ Hx, float* __restrict__ Hy, float* __restrict__ H
                 m1.z = m0.z + (-cx * D_2A * m0.y);
             }
             h   += (2.0f*A/(cx*cx)) * (m1 - m0);       // exchange
-            h.y += (D/cx)*(-m1.z);
-            h.z -= (D/cx)*(-m1.y);
+            h.x += (2*D/cx)*sin(D_2A*cy*iy)*(-m1.y);
+            h.y -= (2*D/cx)*(sin(D_2A*cy*iy)*(-m1.x) - cos(D_2A*cy*iy)*(-m1.z));
+            h.z -= (2*D/cx)*cos(D_2A*cy*iy)*(-m1.y);
         }
     }
 
@@ -96,56 +97,14 @@ adddmibulk(float* __restrict__ Hx, float* __restrict__ Hy, float* __restrict__ H
                 m2.z = m0.z + (+cx * D_2A * m0.y);
             }
             h   += (2.0f*A/(cx*cx)) * (m2 - m0);
-            h.y += (D/cx)*(m2.z);
-            h.z -= (D/cx)*(m2.y);
+            h.x += (2*D/cx)*sin(D_2A*cy*iy)*(m2.y);
+            h.y -= (2*D/cx)*(sin(D_2A*cy*iy)*(m2.x) - cos(D_2A*cy*iy)*(m2.z));
+            h.z -= (2*D/cx)*cos(D_2A*cy*iy)*(m2.y);
         }
     }
 
-    // y derivatives (along height)
-    {
-        float3 m1 = make_float3(0.0f, 0.0f, 0.0f);
-        i_ = idx(ix, lclampy(iy-1), iz);
-        if (iy-1 >= 0 || PBCy) {
-            m1 = make_float3(mx[i_], my[i_], mz[i_]);
-        }
-        int r1 = is0(m1)? r0 : regions[i_];
-        float A = aLUT2d[symidx(r0, r1)];
-        float D = DLUT2d[symidx(r0, r1)];
-        float D_2A = D/(2.0f*A);
-        if (!is0(m1) || !OpenBC){
-            if (is0(m1)) {
-                m1.x = m0.x + (-cy * D_2A * m0.z);
-                m1.y = m0.y;
-                m1.z = m0.z - (-cy * D_2A * m0.x);
-            }
-            h   += (2.0f*A/(cy*cy)) * (m1 - m0);
-            h.x -= (D/cy)*(-m1.z);
-            h.z += (D/cy)*(-m1.x);
-        }
-    }
-
-    {
-        float3 m2 = make_float3(0.0f, 0.0f, 0.0f);
-        i_ = idx(ix, hclampy(iy+1), iz);
-        if  (iy+1 < Ny || PBCy) {
-            m2 = make_float3(mx[i_], my[i_], mz[i_]);
-        }
-        int r1 = is0(m2)? r0 : regions[i_];
-        float A = aLUT2d[symidx(r0, r1)];
-        float D = DLUT2d[symidx(r0, r1)];
-        float D_2A = D/(2.0f*A);
-        if (!is0(m2) || !OpenBC){
-            if (is0(m2)) {
-                m2.x = m0.x + (+cy * D_2A * m0.z);
-                m2.y = m0.y;
-                m2.z = m0.z - (+cy * D_2A * m0.x);
-            }
-            h   += (2.0f*A/(cy*cy)) * (m2 - m0);
-            h.x -= (D/cy)*(m2.z);
-            h.z += (D/cy)*(m2.x);
-        }
-    }
-
+    
+    // z derivatives
     // only take vertical derivative for 3D sim
     if (Nz != 1) {
         // bottom neighbor
@@ -166,8 +125,9 @@ adddmibulk(float* __restrict__ Hx, float* __restrict__ Hy, float* __restrict__ H
                     m1.z = m0.z;
                 }
                 h   += (2.0f*A/(cz*cz)) * (m1 - m0);
-                h.x += (D/cz)*(- m1.y);
-                h.y -= (D/cz)*(- m1.x);
+                h.x += (2*D/cz)*cos(D_2A*cy*iy)*(-m1.y);
+                h.y -= (2*D/cz)*(sin(D_2A*cy*iy)*(-m1.z) + cos(D_2A*cy*iy)*(-m1.z));
+                h.z += (2*D/cz)*sin(D_2A*cy*iy)*(-m1.y);
             }
         }
 
@@ -189,8 +149,9 @@ adddmibulk(float* __restrict__ Hx, float* __restrict__ Hy, float* __restrict__ H
                     m2.z = m0.z;
                 }
                 h   += (2.0f*A/(cz*cz)) * (m2 - m0);
-                h.x += (D/cz)*(m2.y );
-                h.y -= (D/cz)*(m2.x );
+                h.x += (2*D/cz)*cos(D_2A*cy*iy)*(m2.y);
+                h.y -= (2*D/cz)*(sin(D_2A*cy*iy)*(m2.z) + cos(D_2A*cy*iy)*(m2.z));
+                h.z += (2*D/cz)*sin(D_2A*cy*iy)*(m2.y);
             }
         }
     }
